@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 
@@ -125,6 +127,7 @@ async def test_visa_cal_login_and_scrape_success():
     account = result.accounts[0]
     assert account.account_number == "1234"
     assert account.balance == -1250.0
+    assert account.balance_date == "2026-11-02"
     assert account.credit_limit == 15000.0
     assert account.open_to_buy == 12000.0
     assert len(account.txns) == 2
@@ -140,6 +143,87 @@ async def test_visa_cal_login_and_scrape_success():
     assert len(completed) == 1
     assert completed[0].description == "Shufersal"
     assert completed[0].charged_amount == 320.0
+
+
+@pytest.mark.asyncio
+async def test_visa_cal_frames_requested_per_card():
+    frames_by_card = {
+        # Bank-issued card-level frame wins over the cal group's account total.
+        "card_a": {
+            "bankIssuedCards": {
+                "frameLimitForCardAmount": 10000.0,
+                "fictiveMaxAccAmt": 2000.0,
+                "cardLevelFrames": [
+                    {
+                        "cardUniqueId": "card_a",
+                        "nextTotalDebit": 1713.08,
+                        "nextDebitDate": "2026-11-10T00:00:00",
+                    }
+                ],
+            },
+            "calIssuedCards": {"nextTotalDebitForAccount": 999.0},
+        },
+        # A zero charge is real, not a reason to fall back to the account total.
+        "card_b": {
+            "calIssuedCards": {
+                "nextTotalDebitForAccount": 417.9,
+                "cardLevelFrames": [
+                    {
+                        "cardUniqueId": "card_b",
+                        "nextTotalDebit": 0,
+                        "nextDebitDate": "2026-11-02T00:00:00",
+                    }
+                ],
+            }
+        },
+        # No frame for this card: use its own response's total, never another card's frame.
+        "card_c": {
+            "calIssuedCards": {
+                "nextTotalDebitForAccount": 17.9,
+                "nextTotalDebitDateForAccount": "2026-11-02T00:00:00",
+                "cardLevelFrames": [{"cardUniqueId": "card_a", "nextTotalDebit": 1713.08}],
+            }
+        },
+    }
+    frame_requests: list[list[dict]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "/Authentication/api/login/regularLogin" in url:
+            return httpx.Response(200, json={"statusCode": 1, "result": {"calConnectToken": "t"}})
+        if "/Authentication/api/account/init" in url:
+            cards = [
+                {"cardUniqueId": cid, "last4Digits": last4}
+                for cid, last4 in (("card_a", "1111"), ("card_b", "2222"), ("card_c", "3333"))
+            ]
+            return httpx.Response(200, json={"statusCode": 1, "result": {"cards": cards}})
+        if "/Frames/api/Frames/GetTotalFrameStatus" in url:
+            cards = json.loads(request.content)["cardsForFrameData"]
+            frame_requests.append(cards)
+            return httpx.Response(200, json={"result": frames_by_card[cards[0]["cardUniqueId"]]})
+        return httpx.Response(404)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    scraper = VisaCalScraper(credentials={"username": "u", "password": "p"}, client=client)
+
+    result = await scraper.scrape()
+    assert result.success is True
+    assert frame_requests == [
+        [{"cardUniqueId": "card_a"}],
+        [{"cardUniqueId": "card_b"}],
+        [{"cardUniqueId": "card_c"}],
+    ]
+
+    by_num = {a.account_number: a for a in result.accounts}
+    assert by_num["1111"].balance == -1713.08
+    assert by_num["1111"].balance_date == "2026-11-10"
+    assert by_num["1111"].credit_limit == 10000.0
+    assert by_num["1111"].open_to_buy == 8000.0
+    assert by_num["2222"].balance == 0
+    assert by_num["2222"].balance_date == "2026-11-02"
+    assert by_num["3333"].balance == -17.9
+    assert by_num["3333"].balance_date == "2026-11-02"
+    assert by_num["3333"].to_dict()["balance_date"] == "2026-11-02"
 
 
 @pytest.mark.asyncio
