@@ -65,12 +65,14 @@ class Account:
     open_to_buy: float | None = None
     currency: str = "ILS"
     txns: list[Transaction] = field(default_factory=list)
+    balance_date: str | None = None  # ISO YYYY-MM-DD; for cards, the date the balance is charged
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "account_number": self.account_number,
             "account_type": self.account_type.value,
             "balance": self.balance,
+            "balance_date": self.balance_date,
             "credit_limit": self.credit_limit,
             "open_to_buy": self.open_to_buy,
             "currency": self.currency,
