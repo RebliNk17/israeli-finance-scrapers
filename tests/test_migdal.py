@@ -15,8 +15,8 @@ from israeli_finance_scrapers import (
 )
 
 
-def test_encrypt_migdal_pin_token_matches_native_jni() -> None:
-    """Verify AES-256-CBC encryption matches AesCryptorManager.b() output byte-for-byte."""
+def test_encrypt_migdal_pin_token() -> None:
+    """Verify AES-256-CBC PIN token encryption output."""
     token = encrypt_migdal_pin_token(
         "123456789",
         "0123456789abcdef",

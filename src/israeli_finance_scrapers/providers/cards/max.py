@@ -1,7 +1,6 @@
-"""Pure HTTP browserless scraper for Max (Leumi Card) (`com.ideomobile.leumicard`).
+"""Pure HTTP browserless scraper for Max (Leumi Card).
 
-Reverse-engineered from `com.ideomobile.leumicard` (v20.90.1.37 / 539) against
-`https://mpg.max.co.il/MPG49/DRS04/TPS2/lcapi`.
+Connects to `https://mpg.max.co.il/MPG49/DRS04/TPS2/lcapi`.
 """
 
 from __future__ import annotations

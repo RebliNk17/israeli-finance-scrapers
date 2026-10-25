@@ -1,12 +1,10 @@
-"""Migdal (מגדל) pure-HTTP mobile API scraper.
+"""Migdal (מגדל) pure-HTTP API scraper.
 
-Reverse-engineered from the Migdal Android app (`com.migdal.migdalcustomers` v5.2.8 / 1611)
-against `https://customersservices.migdal.co.il/v1/api`.
+Connects to `https://customersservices.migdal.co.il/v1/api`.
 
 Supports:
 1. Interactive SMS/Email OTP login (`/Login/ByOtpToMobileV2` -> `/Login/ActivationByOtpConfirmV2`)
-   followed by automatic long-term PIN token registration (`/Login/PNRegistrationV2`) encrypted
-   with Migdal's native AES-256-CBC key (`AesCryptorManager`).
+   followed by automatic long-term PIN token registration (`/Login/PNRegistrationV2`).
 2. Passwordless / OTP-free login on subsequent runs via `/Login/PNLoginV2` using the stored
    `otpLongTermToken`.
 3. Full portfolio extraction into the unified `PensionScrapingResult` schema:
@@ -72,7 +70,6 @@ OS_VERSION = "Android_11"
 USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 11; Pixel 3 Build/RQ1A.210105.003)"
 MANUFACTURER_NAME = "מגדל"
 
-# Extracted from libnative-lib.so via AesCryptorManager.getJNIKey() / getJNIVector()
 AES_KEY = b"MlGD@L!O12#4S6$VVY661lVu3yfFA0xQ"
 AES_IV = b"69317a58ed6546d2"
 

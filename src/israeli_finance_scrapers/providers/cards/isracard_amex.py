@@ -1,7 +1,6 @@
 """Pure HTTP browserless scrapers for Isracard and American Express Israel.
 
-Reverse-engineered from `com.isracard.hatavot` (v10.0.1) and `com.americanexpress.android` (v9.0.71)
-against `https://ring.isracard.co.il` and `https://ring.americanexpress.co.il`.
+Connects to `https://ring.isracard.co.il` and `https://ring.americanexpress.co.il`.
 """
 
 from __future__ import annotations
