@@ -151,10 +151,11 @@ class ManagementFees:
 
 @dataclass
 class InvestmentTrack:
-    code: str
     name: str
-    allocation_pct: float
+    code: str | None = None
+    allocation_pct: float | None = None
     balance: float | None = None
+    currency: str = "ILS"
     yield_ytd_pct: float | None = None
     yield_as_of_date: str | None = None
     fee_deposit_pct: float | None = None
@@ -186,9 +187,11 @@ class DepositTransaction:
 
 @dataclass
 class MovementItem:
-    description: str
-    amount: float
-    item_type: str | None = None
+    """Raw line item from a yearly movement statement."""
+
+    title: str
+    subtitle: str | None = None
+    amount: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -196,7 +199,7 @@ class MovementItem:
 
 @dataclass
 class YearlyMovementSummary:
-    year: int
+    year: str
     as_of_date: str | None = None
     opening_balance: float | None = None
     deposits: float | None = None
@@ -217,12 +220,10 @@ class YearlyMovementSummary:
 
 @dataclass
 class InsuranceCover:
-    cover_type: str
-    description: str
-    amount: float | None = None
-    monthly_payment: float | None = None
-    beneficiaries: str | None = None
-    valid_until: str | None = None
+    title: str
+    description: str | None = None
+    insured_amount: float | None = None
+    monthly_cost: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -230,12 +231,10 @@ class InsuranceCover:
 
 @dataclass
 class ExpectedPayment:
-    payment_type: str
-    description: str
-    estimated_amount: float
-    estimated_monthly_payment: float | None = None
-    target_age: int | None = None
-    target_date: str | None = None
+    title: str
+    subtitle: str | None = None
+    amount: float | None = None
+    currency: str = "ILS"
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -267,6 +266,8 @@ class FundPolicy:
     establishment_date: str | None = None
     start_date: str | None = None
     liquidity_date: str | None = None
+    is_independent: bool = False  # IRA / קופה בניהול אישי
+    is_section_14: bool | None = None  # סעיף 14
 
     fees: ManagementFees = field(default_factory=ManagementFees)
     tracks: list[InvestmentTrack] = field(default_factory=list)
@@ -276,6 +277,7 @@ class FundPolicy:
     expected_payments: list[ExpectedPayment] = field(default_factory=list)
     balance_history: list[BalancePoint] = field(default_factory=list)
     asset_exposure: AssetExposure | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {

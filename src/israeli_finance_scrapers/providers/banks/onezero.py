@@ -260,7 +260,9 @@ class OneZeroScraper(BaseScraper):
             json={"query": GET_PORTFOLIOS, "variables": {}},
         )
         if port_res.status_code != 200:
-            raise FinanceScraperError(f"Failed to fetch OneZero portfolios: HTTP {port_res.status_code}")
+            raise FinanceScraperError(
+                f"Failed to fetch OneZero portfolios: HTTP {port_res.status_code}"
+            )
 
         port_data = port_res.json()
         portfolios = port_data.get("data", {}).get("portfolios") or []

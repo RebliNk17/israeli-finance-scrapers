@@ -12,11 +12,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from israeli_finance_scrapers.base import OTP_CANCEL_SENTINEL, BaseScraper
-from israeli_finance_scrapers.exceptions import (
+from israeli_finance_scrapers.base import (
+    OTP_CANCEL_SENTINEL,
+    BaseScraper,
+    FinanceScraperError,
     InvalidOtpError,
     OtpCanceledError,
-    FinanceScraperError,
     ScraperErrorType,
 )
 from israeli_finance_scrapers.models import (

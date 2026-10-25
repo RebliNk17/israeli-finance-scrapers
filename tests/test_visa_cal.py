@@ -1,7 +1,6 @@
 import httpx
 import pytest
 
-from israeli_finance_scrapers.base.exceptions import InvalidCredentialsError
 from israeli_finance_scrapers.models.bank import TransactionStatus
 from israeli_finance_scrapers.providers.cards.visa_cal import VisaCalScraper
 
@@ -145,7 +144,9 @@ async def test_visa_cal_login_and_scrape_success():
 @pytest.mark.asyncio
 async def test_visa_cal_invalid_password():
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"statusCode": 4, "statusDescription": "Invalid credentials"})
+        return httpx.Response(
+            200, json={"statusCode": 4, "statusDescription": "Invalid credentials"}
+        )
 
     transport = httpx.MockTransport(handler)
     client = httpx.AsyncClient(transport=transport)

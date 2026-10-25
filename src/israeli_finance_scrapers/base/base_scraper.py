@@ -11,6 +11,8 @@ import httpx
 
 from israeli_finance_scrapers.base.exceptions import (
     FinanceScraperError,
+    InvalidCredentialsError,
+    InvalidOtpError,
     OtpCanceledError,
     ScraperErrorType,
 )

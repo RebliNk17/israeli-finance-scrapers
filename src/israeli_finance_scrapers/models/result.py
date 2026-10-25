@@ -26,13 +26,20 @@ class ScrapingResult:
     error_message: str | None = None
     scraped_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
+    @property
+    def refreshed_long_term_token(self) -> str | None:
+        """Alias for long_term_token for backwards compatibility with pension scrapers."""
+        return self.long_term_token
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "success": self.success,
             "provider": self.provider,
             "accounts": [a.to_dict() for a in self.accounts],
             "funds": [f.to_dict() for f in self.funds],
-            "portfolio_summary": self.portfolio_summary.to_dict() if self.portfolio_summary else None,
+            "portfolio_summary": self.portfolio_summary.to_dict()
+            if self.portfolio_summary
+            else None,
             "insured": self.insured.to_dict() if self.insured else None,
             "long_term_token": self.long_term_token,
             "error_type": self.error_type,

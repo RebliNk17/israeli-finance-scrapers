@@ -98,7 +98,9 @@ class VisaCalScraper(BaseScraper):
         username = self.credentials.get("username")
         password = self.credentials.get("password")
         if not username or not password:
-            raise InvalidCredentialsError("Both 'username' and 'password' are required for Visa Cal")
+            raise InvalidCredentialsError(
+                "Both 'username' and 'password' are required for Visa Cal"
+            )
 
         login_res = await self.client.post(
             f"{CAL_MOBILE_BASE_URL}/Authentication/api/login/regularLogin",
@@ -159,7 +161,9 @@ class VisaCalScraper(BaseScraper):
             return
 
         # 2. Fetch frame and limit details
-        cards_for_frame = [{"cardUniqueId": c["cardUniqueId"]} for c in raw_cards if "cardUniqueId" in c]
+        cards_for_frame = [
+            {"cardUniqueId": c["cardUniqueId"]} for c in raw_cards if "cardUniqueId" in c
+        ]
         frames_res = await self.client.post(
             f"{CAL_MOBILE_BASE_URL}/Frames/api/Frames/GetTotalFrameStatus",
             headers=auth_headers,
@@ -185,6 +189,16 @@ class VisaCalScraper(BaseScraper):
             completed_txns = await self._fetch_completed_transactions(card_id, auth_headers)
 
             all_txns = pending_txns + completed_txns
+
+            # Deduplicate transactions (e.g. statement overlaps)
+            seen_keys: set[tuple[str | None, str, float]] = set()
+            deduped_txns: list[Transaction] = []
+            for t in all_txns:
+                key = (t.identifier, t.date, t.charged_amount)
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    deduped_txns.append(t)
+            all_txns = deduped_txns
 
             # Filter by start_date if requested
             if self.options.start_date:
@@ -218,7 +232,9 @@ class VisaCalScraper(BaseScraper):
 
         next_debit = matched_frame.get("nextTotalDebit") if matched_frame else None
         if next_debit is None:
-            next_debit = bank_group.get("nextTotalDebitForAccount") or cal_group.get("nextTotalDebitForAccount")
+            next_debit = bank_group.get("nextTotalDebitForAccount") or cal_group.get(
+                "nextTotalDebitForAccount"
+            )
 
         limit = None
         open_to_buy = None
@@ -340,7 +356,9 @@ class VisaCalScraper(BaseScraper):
             date=purchase_date or proc_date,
             processed_date=proc_date or None,
             original_amount=original_amount,
-            original_currency=_normalize_currency(t.get("debCrdCurrencySymbol") or t.get("trnCurrencySymbol")),
+            original_currency=_normalize_currency(
+                t.get("debCrdCurrencySymbol") or t.get("trnCurrencySymbol")
+            ),
             charged_amount=charged_amount,
             description=str(t.get("merchantName") or "").strip(),
             memo=str(t.get("branchCodeDesc") or "").strip() or None,
