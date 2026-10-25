@@ -28,7 +28,7 @@ from israeli_finance_scrapers.models.bank import (
     TransactionStatus,
     TransactionType,
 )
-from israeli_finance_scrapers.utils import extract_number, parse_il_date
+from israeli_finance_scrapers.utils import extract_number, normalize_israeli_id, parse_il_date
 
 MAX_LCAPI_BASE_URL = "https://mpg.max.co.il/MPG49/DRS04/TPS2/lcapi"
 APP_ID = "505"
@@ -150,14 +150,9 @@ class MaxScraper(BaseScraper):
         return resp.json()
 
     async def login(self) -> None:
-        """Authenticate via C391 -> C305 (or C661 + C666 if device OTP enrollment is needed)."""
+        """Authenticate via username/password (C305/C661+C666) or SMS OTP + 8-digit card (C703/C704/C705)."""
         if self.client is None:
             await self.initialize()
-
-        username = self.credentials.get("username")
-        password = self.credentials.get("password")
-        if not username or not password:
-            raise InvalidCredentialsError("Both 'username' and 'password' are required for Max")
 
         # 1. Bootstrap session via C391
         await self._post_cmd(
@@ -171,12 +166,38 @@ class MaxScraper(BaseScraper):
             },
         )
 
+        username = self.credentials.get("username")
+        password = self.credentials.get("password")
+        if username and password:
+            await self._login_with_password(str(username).strip(), str(password))
+            return
+
+        raw_id = self.credentials.get("id") or self.credentials.get("uId") or username
+        card8 = (
+            self.credentials.get("card8Digits")
+            or self.credentials.get("cNum")
+            or self.credentials.get("cardNumber")
+        )
+        bank_account = self.credentials.get("bankAccountNum") or self.credentials.get("account")
+        if raw_id and (card8 or bank_account):
+            await self._login_with_sms_otp(
+                normalize_israeli_id(str(raw_id)),
+                card8=str(card8).strip() if card8 else "",
+                bank_account=str(bank_account).strip() if bank_account else "",
+            )
+            return
+
+        raise InvalidCredentialsError(
+            "Max requires either ('username' and 'password') or ('id' and 'card8Digits'/'bankAccountNum' for SMS OTP)"
+        )
+
+    async def _login_with_password(self, username: str, password: str) -> None:
         # 2. Authenticate on registered device via C305
         r305 = await self._post_cmd(
             305,
             {
-                "uName": str(username).strip(),
-                "pass": str(password),
+                "uName": username,
+                "pass": password,
                 "uId": 0,
                 "eP": False,
                 "uRecreate": False,
@@ -210,9 +231,9 @@ class MaxScraper(BaseScraper):
             {
                 "hash": "u52s/9PLKC2",
                 "overrideRegistration": True,
-                "password": str(password),
+                "password": password,
                 "sourceScreen": 2,
-                "username": str(username).strip(),
+                "username": username,
             },
         )
         do661 = r661.get("DO") or {}
@@ -250,6 +271,55 @@ class MaxScraper(BaseScraper):
             return
 
         raise InvalidCredentialsError(msg661 or msg305 or "Max login failed")
+
+    async def _login_with_sms_otp(
+        self,
+        id_num: str,
+        *,
+        card8: str = "",
+        bank_account: str = "",
+    ) -> None:
+        """Authenticate via C703 -> C704 (send SMS) -> C705 (verify SMS + 8-digit card or account)."""
+        await self._post_cmd(703)
+        r704 = await self._post_cmd(
+            704,
+            {
+                "hash": "u52s/9PLKC2",
+                "uId": id_num,
+            },
+        )
+        do704 = r704.get("DO") or {}
+        gen704 = do704.get("Gen") or {}
+        if gen704.get("Status") != 0 or gen704.get("RC") not in (0, None):
+            msg704 = str(gen704.get("Msg") or do704.get("ErrorMessage") or "Max C704 failed")
+            raise InvalidCredentialsError(msg704)
+
+        otp_code = await self._resolve_otp_code()
+        r705 = await self._post_cmd(
+            705,
+            {
+                "account": bank_account,
+                "cNum": card8,
+                "code": otp_code,
+                "is3ds": False,
+            },
+        )
+        do705 = r705.get("DO") or {}
+        sub305 = do705.get("DO305") or {}
+        gen_sub = sub305.get("Gen") or {}
+        if gen_sub.get("UAuth") is not True:
+            msg705 = str(
+                (do705.get("Gen") or {}).get("Msg")
+                or gen_sub.get("Msg")
+                or "Max rejected the SMS OTP or card/account number"
+            )
+            raise InvalidOtpError(msg705)
+
+        if gen_sub.get("NewSId"):
+            self._sid = str(gen_sub["NewSId"])
+        self._dl_cards = sub305.get("DLCards") or []
+        self._logged_in = True
+        self.refreshed_long_term_token = json.dumps({"dId": self._did, "fpr": self._fpr})
 
     async def fetch_data(self) -> None:
         """Fetch all cards and monthly transactions via C495 and C382."""

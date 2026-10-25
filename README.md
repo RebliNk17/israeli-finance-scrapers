@@ -17,7 +17,7 @@ Unified, modern async Python library to scrape Israeli banks, credit cards, and 
 | `onezero` | One Zero Bank | וואן זירו | Bank | GraphQL API + mTLS, SMS OTP + 10-year `otpLongTermToken` (`idToken`) |
 | `pepper` | Pepper Bank | פפר | Bank | Transmit Security v2 + GraphQL (`phoneNumber` + `password`), SMS OTP + persistent `otpLongTermToken` |
 | `visa_cal` | Visa Cal | ויזה כאל | Credit Card | Mobile REST API (`username` + `password` OR `id` + `card4Digits` SMS OTP) + persistent `otpLongTermToken` (`bioLogin`) |
-| `max` | Max (Leumi Card) | מקס | Credit Card | Mobile REST API (`lcapi`, `username` + `password`) + persistent device fingerprint (`otpLongTermToken`) |
+| `max` | Max (Leumi Card) | מקס | Credit Card | Mobile REST API (`lcapi`, `username` + `password` OR `id` + `card8Digits` SMS OTP) + persistent device fingerprint (`otpLongTermToken`) |
 | `isracard` | Isracard | ישראכרט | Credit Card | Mobile REST API (`ring.isracard.co.il`, `id` + `card6Digits` + `password` OR SMS OTP) + persistent `otpLongTermToken` |
 | `amex` | American Express IL | אמריקן אקספרס | Credit Card | Mobile REST API (`ring.americanexpress.co.il`, `id` + `card6Digits` + `password` OR SMS OTP) + persistent `otpLongTermToken` |
 | `haphoenix` | The Phoenix | הפניקס | Pension & Savings | SMS OTP (`id` + `phoneNumber`) + 6-month `otpLongTermToken` |
