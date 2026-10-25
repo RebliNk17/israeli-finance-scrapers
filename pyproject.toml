@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "israeli-finance-scrapers"
+dynamic = ["version"]
+description = "Unified async Python scrapers for Israeli banks, credit cards, and pension providers"
+readme = "README.md"
+authors = [
+    { name = "RebliNk17", email = "21306877+RebliNk17@users.noreply.github.com" }
+]
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+    "httpx>=0.28.0",
+    "cryptography>=43.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/RebliNk17/israeli-finance-scrapers"
+Repository = "https://github.com/RebliNk17/israeli-finance-scrapers"
+Issues = "https://github.com/RebliNk17/israeli-finance-scrapers/issues"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.6.0",
+]
+
+[tool.semantic_release]
+major_on_zero = false
+allow_zero_version = true
+tag_format = "v{version}"
+commit = false
+
+[tool.semantic_release.branches.master]
+match = "master"
+prerelease = false
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/israeli_finance_scrapers"]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.version.raw-options]
+local_scheme = "no-local-version"
+fallback_version = "0.1.0"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
