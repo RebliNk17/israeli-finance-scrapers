@@ -260,18 +260,7 @@ class VisaCalScraper(BaseScraper):
             self.accounts = []
             return
 
-        # 2. Fetch frame and limit details
-        cards_for_frame = [
-            {"cardUniqueId": c["cardUniqueId"]} for c in raw_cards if "cardUniqueId" in c
-        ]
-        frames_res = await self.client.post(
-            f"{CAL_MOBILE_BASE_URL}/Frames/api/Frames/GetTotalFrameStatus",
-            headers=auth_headers,
-            json={"cardsForFrameData": cards_for_frame},
-        )
-        frames_data = frames_res.json().get("result") or {} if frames_res.status_code == 200 else {}
-
-        # 3. For each card, fetch pending + completed transactions
+        # 2. For each card, fetch frame, pending + completed transactions
         scraped_accounts: list[Account] = []
         for card in raw_cards:
             card_id = card.get("cardUniqueId")
@@ -279,8 +268,19 @@ class VisaCalScraper(BaseScraper):
             if not card_id:
                 continue
 
-            # Frame calculation for this card
-            card_limit, open_to_buy, next_debit = self._parse_frame(card_id, frames_data)
+            # Frames are requested one card at a time: a multi-card request returns
+            # no matching cardLevelFrames, only the account-wide total.
+            frames_res = await self.client.post(
+                f"{CAL_MOBILE_BASE_URL}/Frames/api/Frames/GetTotalFrameStatus",
+                headers=auth_headers,
+                json={"cardsForFrameData": [{"cardUniqueId": card_id}]},
+            )
+            frames_data = (
+                (frames_res.json().get("result") or {}) if frames_res.status_code == 200 else {}
+            )
+            card_limit, open_to_buy, next_debit, debit_date = self._parse_frame(
+                card_id, frames_data
+            )
 
             # Pending transactions
             pending_txns = await self._fetch_pending_transactions(card_id, auth_headers)
@@ -310,6 +310,7 @@ class VisaCalScraper(BaseScraper):
                     account_number=last4,
                     account_type=AccountType.CREDIT_CARD,
                     balance=-next_debit if next_debit is not None else None,
+                    balance_date=debit_date,
                     credit_limit=card_limit,
                     open_to_buy=open_to_buy,
                     currency="ILS",
@@ -321,31 +322,35 @@ class VisaCalScraper(BaseScraper):
 
     def _parse_frame(
         self, card_id: str, frames_data: dict[str, Any]
-    ) -> tuple[float | None, float | None, float | None]:
+    ) -> tuple[float | None, float | None, float | None, str | None]:
+        """Return (limit, open_to_buy, next_debit, next_debit_date) from one card's frames."""
         bank_group = frames_data.get("bankIssuedCards") or {}
         cal_group = frames_data.get("calIssuedCards") or {}
 
-        # Look in cardLevelFrames
-        frames_list = bank_group.get("cardLevelFrames") or []
-        frames_list += cal_group.get("cardLevelFrames") or []
-        matched_frame = next((f for f in frames_list if f.get("cardUniqueId") == card_id), None)
-
-        next_debit = matched_frame.get("nextTotalDebit") if matched_frame else None
-        if next_debit is None:
-            next_debit = bank_group.get("nextTotalDebitForAccount") or cal_group.get(
-                "nextTotalDebitForAccount"
+        # Card-level frame: bank-issued first, then cal-issued. Without one, fall back
+        # to this response's own group (bank-issued if present).
+        frame: dict[str, Any] | None = None
+        group = bank_group or cal_group
+        for g in (bank_group, cal_group):
+            frame = next(
+                (f for f in g.get("cardLevelFrames") or [] if f.get("cardUniqueId") == card_id),
+                None,
             )
+            if frame is not None:
+                group = g
+                break
+        frame = frame or {}
 
-        limit = None
-        open_to_buy = None
-        group = cal_group if cal_group.get("frameLimitForCardAmount") else bank_group
-        if group:
-            limit = group.get("frameLimitForCardAmount")
-            fictive = group.get("fictiveMaxAccAmt")
-            if limit is not None and fictive is not None:
-                open_to_buy = limit - fictive
+        next_debit = frame.get("nextTotalDebit")
+        if next_debit is None:
+            next_debit = group.get("nextTotalDebitForAccount")
+        debit_date = frame.get("nextDebitDate") or group.get("nextTotalDebitDateForAccount")
 
-        return limit, open_to_buy, next_debit
+        limit = group.get("frameLimitForCardAmount")
+        fictive = group.get("fictiveMaxAccAmt")
+        open_to_buy = limit - fictive if limit is not None and fictive is not None else None
+
+        return limit, open_to_buy, next_debit, str(debit_date)[:10] if debit_date else None
 
     async def _fetch_pending_transactions(
         self, card_id: str, headers: dict[str, str]
