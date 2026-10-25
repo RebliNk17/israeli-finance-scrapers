@@ -13,13 +13,12 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from israeli_finance_scrapers.base.base_scraper import OTP_CANCEL_SENTINEL, BaseScraper
+from israeli_finance_scrapers.base.base_scraper import BaseScraper
 from israeli_finance_scrapers.base.exceptions import (
     AccountBlockedError,
     FinanceScraperError,
     InvalidCredentialsError,
     InvalidOtpError,
-    OtpCanceledError,
 )
 from israeli_finance_scrapers.models.bank import (
     Account,
@@ -224,13 +223,7 @@ class MaxScraper(BaseScraper):
             raise InvalidCredentialsError(msg661 or "Invalid Max username or password")
 
         if do661.get("ScreenId") == 3:
-            if self.on_otp_request is None:
-                raise FinanceScraperError(
-                    "Max requires SMS OTP for new device enrollment, but on_otp_request is not set"
-                )
-            otp_code = (await self.on_otp_request()).strip()
-            if not otp_code or otp_code == OTP_CANCEL_SENTINEL:
-                raise OtpCanceledError()
+            otp_code = await self._resolve_otp_code()
 
             key_fp = str(uuid.uuid4())
             self._fpr = hashlib.sha256((key_fp + self._did).encode("utf-8")).hexdigest()

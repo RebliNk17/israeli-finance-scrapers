@@ -1,6 +1,7 @@
 import httpx
 import pytest
 
+from israeli_finance_scrapers.base.base_scraper import ScraperOptions
 from israeli_finance_scrapers.models.bank import TransactionStatus
 from israeli_finance_scrapers.providers.cards.visa_cal import VisaCalScraper
 
@@ -159,3 +160,48 @@ async def test_visa_cal_invalid_password():
     result = await scraper.scrape()
     assert result.success is False
     assert result.error_type == "INVALID_CREDENTIALS"
+
+
+@pytest.mark.asyncio
+async def test_visa_cal_sms_otp_login_and_long_term_token():
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "/Authentication/api/login/sendOTP" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "statusCode": 1,
+                    "result": {"token": "otp-session-token-1", "phoneNumber": "050-*****99"},
+                },
+            )
+        if "/Authentication/api/login/verifyOTP" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "statusCode": 1,
+                    "result": {
+                        "calConnectToken": "token_from_otp",
+                        "temporaryGuid": "guid_from_otp",
+                        "hash": "bio_hash_from_otp",
+                    },
+                },
+            )
+        if "/Authentication/api/account/init" in url:
+            return httpx.Response(200, json={"statusCode": 1, "result": {"cards": []}})
+        return httpx.Response(404)
+
+    async def resolve_otp() -> str:
+        return "654321"
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(transport=transport)
+
+    scraper = VisaCalScraper(
+        credentials={"id": "000000018", "card4Digits": "1234"},
+        options=ScraperOptions(otp_code_resolver=resolve_otp),
+        client=client,
+    )
+
+    result = await scraper.scrape()
+    assert result.success is True
+    assert result.long_term_token == "bio_hash_from_otp"

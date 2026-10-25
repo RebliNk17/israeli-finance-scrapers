@@ -149,3 +149,121 @@ async def test_isracard_and_amex_mobile_scrape(provider: str) -> None:
     assert completed.type == TransactionType.INSTALLMENTS
     assert completed.installments is not None
     assert (completed.installments.number, completed.installments.total) == (1, 3)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["isracard", "amex"])
+async def test_isracard_and_amex_sms_otp_and_token_login(provider: str) -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        url = str(req.url)
+        body = json.loads(req.content.decode()) if req.content else {}
+        if "serviceName=ValidateIdDataNoReg" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "Header": {"Status": "1", "Message": []},
+                    "ValidateIdDataNoRegBean": {
+                        "returnCode": "1",
+                        "userName": "IsraUser",
+                        "bcKey": "bc-key-otp",
+                    },
+                },
+            )
+        if "serviceName=SendOTP" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "Header": {"Status": "1", "Message": []},
+                    "SendOTPBean": {"returnCode": "0", "smsMasked": "050-0****00"},
+                },
+            )
+        if "serviceName=ValidateOTPNoReg" in url:
+            assert body.get("otp") == "112233"
+            return httpx.Response(
+                200,
+                json={
+                    "Header": {"Status": "1", "Message": []},
+                    "ValidateOTPNoRegBean": {"returnCode": "0"},
+                },
+            )
+        if "serviceName=performLogonOtp" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "Header": {"Status": "1", "Message": []},
+                    "CustomerLogonBean": {"returnCode": "1"},
+                },
+            )
+        if "serviceName=CustomerValidateKeyOtp" in url:
+            if body.get("checkLevel") == "9":
+                return httpx.Response(
+                    200,
+                    json={
+                        "Header": {"Status": "1", "Message": []},
+                        "CustomerValidateKeyOtpBean": {
+                            "returnCode": "1",
+                            "key": "minted-long-term-key",
+                        },
+                    },
+                )
+            if body.get("checkLevel") == "4":
+                return httpx.Response(
+                    200,
+                    json={
+                        "Header": {"Status": "1", "Message": []},
+                        "CustomerValidateKeyOtpBean": {
+                            "returnCode": "1",
+                            "key": "rotated-long-term-key",
+                            "idNumber": "000000018",
+                            "userName": "IsraUser",
+                        },
+                    },
+                )
+        if "serviceName=CustomerDataRegistration" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "Header": {"Status": "1", "Message": []},
+                    "CustomerDataRegistrationBean": {"returnCode": "1"},
+                },
+            )
+        if "serviceName=CardsList_102Digital" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "Header": {"Status": "1", "Message": []},
+                    "CardsList_102DigitalBean": {"Table1": []},
+                },
+            )
+        return httpx.Response(200, json={})
+
+    async def resolve_otp() -> str:
+        return "112233"
+
+    # 1. SMS OTP login mints a persistent udid:key long_term_token
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        scraper1 = create_scraper(
+            provider,
+            {"id": "000000018", "card6Digits": "123456"},
+            ScraperOptions(start_date="2026-10-01", otp_code_resolver=resolve_otp),
+            client=client,
+        )
+        res1 = await scraper1.scrape()
+
+    assert res1.success is True
+    assert res1.long_term_token is not None
+    assert res1.long_term_token.endswith(":minted-long-term-key")
+
+    # 2. Subsequent login with otpLongTermToken succeeds without SMS or password
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client2:
+        scraper2 = create_scraper(
+            provider,
+            {"id": "000000018", "card6Digits": "123456", "otpLongTermToken": res1.long_term_token},
+            ScraperOptions(start_date="2026-10-01"),
+            client=client2,
+        )
+        res2 = await scraper2.scrape()
+
+    assert res2.success is True
+    assert res2.long_term_token is not None
+    assert res2.long_term_token.endswith(":rotated-long-term-key")

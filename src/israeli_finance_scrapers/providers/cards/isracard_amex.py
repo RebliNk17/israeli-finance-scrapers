@@ -16,6 +16,7 @@ from israeli_finance_scrapers.base.exceptions import (
     AccountBlockedError,
     FinanceScraperError,
     InvalidCredentialsError,
+    InvalidOtpError,
 )
 from israeli_finance_scrapers.models.bank import (
     Account,
@@ -57,6 +58,7 @@ class BaseIsracardAmexScraper(BaseScraper):
     application_id: str = "mi"
     isr_domain: str = "isracard"
     company_code: int = 11
+    wallet_id: str = "216"
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -100,16 +102,21 @@ class BaseIsracardAmexScraper(BaseScraper):
         return resp.json()
 
     async def login(self) -> None:
-        """Authenticate via ValidateIdDataNoReg -> performNewLogon."""
+        """Authenticate via long-term device token, password, or SMS OTP."""
         if self.client is None:
             await self.initialize()
 
+        # 1. Try long-term device token (udid:key) if provided
+        long_term_token = self.credentials.get("otpLongTermToken")
+        if long_term_token and await self._try_token_login(str(long_term_token).strip()):
+            self._logged_in = True
+            return
+
         raw_id = self.credentials.get("id")
         card6 = self.credentials.get("card6Digits")
-        password = self.credentials.get("password")
-        if not raw_id or not card6 or not password:
+        if not raw_id or not card6:
             raise InvalidCredentialsError(
-                f"'id', 'card6Digits', and 'password' are required for {self.provider_name}"
+                f"'id' and 'card6Digits' are required for {self.provider_name}"
             )
 
         id_num = normalize_israeli_id(str(raw_id))
@@ -140,14 +147,92 @@ class BaseIsracardAmexScraper(BaseScraper):
 
         if val_bean.get("bcKey"):
             self._bc_key = str(val_bean["bcKey"])
-        user_name = str(val_bean.get("userName") or "")
+        raw_user_name = val_bean.get("userName")
+        user_name = str(raw_user_name) if isinstance(raw_user_name, str) else ""
 
+        password = self.credentials.get("password")
+        if password:
+            await self._login_with_password(id_num, user_name, str(password))
+        else:
+            await self._login_with_sms_otp(id_num, card_suffix, user_name)
+
+        self._logged_in = True
+        with contextlib.suppress(Exception):
+            await self._register_long_term_key(id_num, card_suffix)
+
+    async def _try_token_login(self, token_str: str) -> bool:
+        """Attempt passwordless/OTP-less login using a persisted 'udid:key' token."""
+        if ":" not in token_str:
+            return False
+        udid, key = token_str.split(":", 1)
+        if not udid or not key:
+            return False
+
+        with contextlib.suppress(Exception):
+            val_resp = await self._post_service(
+                "CustomerValidateKeyOtp",
+                {
+                    "reqName": "CustomerValidateKeyOtp",
+                    "companyCode": str(self.company_code),
+                    "applicationSource": "1",
+                    "returnMessage": "true",
+                    "checkLevel": "4",
+                    "idMethod": "1",
+                    "key": key,
+                    "MAC": "1",
+                    "UDID": udid,
+                    "ARRAY": "0",
+                },
+            )
+            bean = val_resp.get("CustomerValidateKeyOtpBean") or {}
+            if str(bean.get("returnCode") or "") != "1":
+                return False
+
+            if bean.get("bcKey"):
+                self._bc_key = str(bean["bcKey"])
+            id_num = str(
+                bean.get("idNumber")
+                or bean.get("id")
+                or normalize_israeli_id(str(self.credentials.get("id") or ""))
+            )
+            raw_uname = bean.get("userName")
+            user_name = str(raw_uname) if isinstance(raw_uname, str) else ""
+            new_key = str(bean.get("key") or key)
+
+            logon_resp = await self._post_service(
+                "performLogonOtp",
+                {
+                    "reqName": "performLogonOtp",
+                    "MisparZihuy": id_num,
+                    "KodZihuy": "1",
+                    "KodEretz": "212",
+                    "countryCode": "212",
+                    "KodMedina": "212",
+                    "KodMishtamesh": user_name,
+                    "otpSMS": False,
+                    "returnMessage": "true",
+                    "ap": "MisparZihuy",
+                    "paymentAppInstanceId": "",
+                    "walletId": self.wallet_id,
+                },
+            )
+            logon_bean = logon_resp.get("CustomerLogonBean") or {}
+            header = logon_resp.get("Header") or {}
+            if (
+                str(header.get("Status") or "") == "1"
+                and str(logon_bean.get("returnCode") or "") == "1"
+            ):
+                self.refreshed_long_term_token = f"{udid}:{new_key}"
+                return True
+        return False
+
+    async def _login_with_password(self, id_num: str, user_name: str, password: str) -> None:
         logon_resp = await self._post_service(
             "performNewLogon",
             {
                 "MisparZihuy": id_num,
                 "KodMishtamesh": user_name,
-                "Sisma": str(password),
+                "Sisma": password,
                 "KodZihuy": "1",
                 "KodEretz": "212",
                 "returnMessage": "true",
@@ -163,7 +248,126 @@ class BaseIsracardAmexScraper(BaseScraper):
         if status != "1":
             raise InvalidCredentialsError(str(header.get("Message") or "Invalid password"))
 
-        self._logged_in = True
+    async def _login_with_sms_otp(self, id_num: str, card_suffix: str, user_name: str) -> None:
+        send_resp = await self._post_service(
+            "SendOTP",
+            {
+                "reqName": "SendOTP",
+                "id": id_num,
+                "idType": "1",
+                "countryCode": "212",
+                "cardSuffix": card_suffix,
+                "kodChevra": str(self.company_code),
+                "cardNumberIndex": "0",
+                "sendBySMS": "true",
+                "sendByEmail": "false",
+                "returnMessage": "true",
+                "operationSystem": "1",
+                "appHashCode": "",
+            },
+        )
+        send_bean = send_resp.get("SendOTPBean") or {}
+        send_rc = str(send_bean.get("returnCode") or "")
+        if send_rc == "33":
+            raise AccountBlockedError(str(send_bean.get("message") or "User locked"))
+        if send_rc not in ("0", "47", "50"):
+            raise FinanceScraperError(
+                str(send_bean.get("message") or f"SendOTP failed with returnCode={send_rc}")
+            )
+
+        otp_code = self.credentials.get("otpCode") or await self._resolve_otp_code()
+        otp_str = str(otp_code).strip()
+
+        val_otp_resp = await self._post_service(
+            "ValidateOTPNoReg",
+            {
+                "kodChevra": str(self.company_code),
+                "reqName": "ValidateOTPNoReg",
+                "id": id_num,
+                "idType": "1",
+                "countryCode": "212",
+                "cardSuffix": card_suffix,
+                "cardNumberIndex": "0",
+                "otp": otp_str,
+                "returnMessage": "true",
+            },
+        )
+        val_otp_bean = val_otp_resp.get("ValidateOTPNoRegBean") or {}
+        val_otp_rc = str(val_otp_bean.get("returnCode") or "")
+        if val_otp_rc not in ("0", "7"):
+            raise InvalidOtpError(str(val_otp_bean.get("message") or "Invalid SMS OTP code"))
+
+        logon_resp = await self._post_service(
+            "performLogonOtp",
+            {
+                "reqName": "performLogonOtp",
+                "MisparZihuy": id_num,
+                "KodZihuy": "1",
+                "KodEretz": "212",
+                "countryCode": "212",
+                "KodMedina": "212",
+                "KodMishtamesh": user_name,
+                "otpSMS": otp_str,
+                "returnMessage": "true",
+                "ap": "MisparZihuy",
+                "paymentAppInstanceId": "",
+                "walletId": self.wallet_id,
+            },
+        )
+        header = logon_resp.get("Header") or {}
+        logon_bean = logon_resp.get("CustomerLogonBean") or {}
+        if str(header.get("Status") or "") != "1" or str(logon_bean.get("returnCode") or "") != "1":
+            raise InvalidCredentialsError(
+                str(header.get("Message") or logon_bean.get("message") or "OTP logon failed")
+            )
+
+    async def _register_long_term_key(self, id_num: str, card_suffix: str) -> None:
+        """Mint and register a persistent device key for subsequent passwordless/OTP-less syncs."""
+        udid = uuid.uuid4().hex[:16]
+        key_resp = await self._post_service(
+            "CustomerValidateKeyOtp",
+            {
+                "reqName": "CustomerValidateKeyOtp",
+                "companyCode": str(self.company_code),
+                "applicationSource": "1",
+                "returnMessage": "true",
+                "checkLevel": "9",
+                "MAC": "1",
+                "UDID": udid,
+                "ARRAY": "0",
+                "idType": "1",
+                "countryCode": "212",
+                "idNumber": id_num,
+                "cardSuffix": card_suffix,
+            },
+        )
+        key_bean = key_resp.get("CustomerValidateKeyOtpBean") or {}
+        key = key_bean.get("key")
+        if not key or not isinstance(key, str):
+            return
+
+        reg_resp = await self._post_service(
+            "CustomerDataRegistration",
+            {
+                "reqName": "CustomerDataRegistration",
+                "idNumber": id_num,
+                "idType": "1",
+                "countryCode": "212",
+                "companyCode": str(self.company_code),
+                "activityType": "1",
+                "applicationSource": "1",
+                "defaultIdMethod": "1",
+                "entryMethod": "1",
+                "key": key,
+                "UDID": udid,
+                "MAC": "1",
+                "ARRAY": "0",
+                "returnMessage": "true",
+            },
+        )
+        reg_bean = reg_resp.get("CustomerDataRegistrationBean") or {}
+        if str(reg_bean.get("returnCode") or "") == "1":
+            self.refreshed_long_term_token = f"{udid}:{key}"
 
     async def fetch_data(self) -> None:
         """Fetch all cards and monthly completed & pending transactions."""
@@ -376,20 +580,22 @@ class BaseIsracardAmexScraper(BaseScraper):
 
 
 class IsracardScraper(BaseIsracardAmexScraper):
-    """Pure HTTP browserless scraper for Isracard (`com.isracard.hatavot`)."""
+    """Pure HTTP browserless scraper for Isracard."""
 
     provider_name = "isracard"
     ring_base_url = "https://ring.isracard.co.il"
     application_id = "mi"
     isr_domain = "isracard"
     company_code = 11
+    wallet_id = "216"
 
 
 class AmexScraper(BaseIsracardAmexScraper):
-    """Pure HTTP browserless scraper for American Express Israel (`com.americanexpress.android`)."""
+    """Pure HTTP browserless scraper for American Express Israel."""
 
     provider_name = "amex"
     ring_base_url = "https://ring.americanexpress.co.il"
     application_id = "ma"
     isr_domain = "amex"
     company_code = 77
+    wallet_id = "AQ"
