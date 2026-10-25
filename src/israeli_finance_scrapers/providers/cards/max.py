@@ -18,7 +18,6 @@ from israeli_finance_scrapers.base.exceptions import (
     AccountBlockedError,
     FinanceScraperError,
     InvalidCredentialsError,
-    InvalidOtpError,
 )
 from israeli_finance_scrapers.models.bank import (
     Account,
@@ -150,7 +149,7 @@ class MaxScraper(BaseScraper):
         return resp.json()
 
     async def login(self) -> None:
-        """Authenticate via C391 -> C305 (or C661 + C666 if device enrollment is needed)."""
+        """Authenticate via C391 -> C305 using username and password."""
         if self.client is None:
             await self.initialize()
 
@@ -171,7 +170,7 @@ class MaxScraper(BaseScraper):
             },
         )
 
-        # 2. Authenticate on registered device via C305
+        # 2. Authenticate via C305
         r305 = await self._post_cmd(
             305,
             {
@@ -195,61 +194,10 @@ class MaxScraper(BaseScraper):
             self.refreshed_long_term_token = json.dumps({"dId": self._did, "fpr": self._fpr})
             return
 
-        # Check if C305 reported invalid credentials or blocked account
-        rc305 = gen305.get("RC")
-        msg305 = str(gen305.get("Msg") or "")
-        if rc305 in (4, 11, 14, 15) or "שגויים" in msg305 or "אינם נכונים" in msg305:
-            raise InvalidCredentialsError(msg305 or "Invalid Max username or password")
+        msg305 = str(gen305.get("Msg") or do305.get("ErrorMessage") or "")
         if any(w in msg305 for w in ("נחסם", "נעול", "ננעל")):
             raise AccountBlockedError(msg305)
-
-        # 3. Fallback: Device registration flow (C660 -> C661 -> C666)
-        await self._post_cmd(660, {})
-        r661 = await self._post_cmd(
-            661,
-            {
-                "hash": "u52s/9PLKC2",
-                "overrideRegistration": True,
-                "password": str(password),
-                "sourceScreen": 2,
-                "username": str(username).strip(),
-            },
-        )
-        do661 = r661.get("DO") or {}
-        gen661 = do661.get("Gen") or {}
-        rc661 = gen661.get("RC")
-        msg661 = str(gen661.get("Msg") or do661.get("ErrorMessage") or "")
-        if rc661 == 11 or "שגויים" in msg661 or "אינם נכונים" in msg661:
-            raise InvalidCredentialsError(msg661 or "Invalid Max username or password")
-
-        if do661.get("ScreenId") == 3:
-            otp_code = await self._resolve_otp_code()
-
-            key_fp = str(uuid.uuid4())
-            self._fpr = hashlib.sha256((key_fp + self._did).encode("utf-8")).hexdigest()
-            r666 = await self._post_cmd(
-                666,
-                {
-                    "bioAllowed": False,
-                    "otp": otp_code,
-                    "sourceScreen": 2,
-                },
-            )
-            do666 = r666.get("DO") or {}
-            sub305 = do666.get("DO305") or {}
-            gen_sub = sub305.get("Gen") or {}
-            if gen_sub.get("UAuth") is not True:
-                raise InvalidOtpError("Max rejected the OTP code")
-            if gen_sub.get("NewSId"):
-                self._sid = str(gen_sub["NewSId"])
-            self._dl_cards = sub305.get("DLCards") or []
-            self._logged_in = True
-            self.refreshed_long_term_token = json.dumps(
-                {"dId": self._did, "keyFp": key_fp, "fpr": self._fpr}
-            )
-            return
-
-        raise InvalidCredentialsError(msg661 or msg305 or "Max login failed")
+        raise InvalidCredentialsError(msg305 or "Invalid Max username or password")
 
     async def fetch_data(self) -> None:
         """Fetch all cards and monthly transactions via C495 and C382."""
