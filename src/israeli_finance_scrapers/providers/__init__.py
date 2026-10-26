@@ -9,6 +9,12 @@ import httpx
 
 from israeli_finance_scrapers.base.base_scraper import BaseScraper, ScraperOptions
 from israeli_finance_scrapers.providers.banks.onezero import OneZeroScraper
+from israeli_finance_scrapers.providers.banks.pepper import PepperScraper
+from israeli_finance_scrapers.providers.cards.isracard_amex import (
+    AmexScraper,
+    IsracardScraper,
+)
+from israeli_finance_scrapers.providers.cards.max import MaxScraper
 from israeli_finance_scrapers.providers.cards.visa_cal import VisaCalScraper
 from israeli_finance_scrapers.providers.pensions.haphoenix import HaPhoenixScraper
 from israeli_finance_scrapers.providers.pensions.migdal import (
@@ -29,6 +35,24 @@ class ProviderMetadata:
 
 
 PROVIDERS: dict[str, ProviderMetadata] = {
+    "onezero": ProviderMetadata(
+        key="onezero",
+        category="bank",
+        display_name="One Zero",
+        hebrew_name="וואן זירו",
+        login_fields=("email", "password", "phoneNumber"),
+        supports_otp=True,
+        supports_long_term_token=True,
+    ),
+    "pepper": ProviderMetadata(
+        key="pepper",
+        category="bank",
+        display_name="Pepper",
+        hebrew_name="פפר",
+        login_fields=("phoneNumber", "password"),
+        supports_otp=True,
+        supports_long_term_token=True,
+    ),
     "visa_cal": ProviderMetadata(
         key="visa_cal",
         category="credit_card",
@@ -38,14 +62,32 @@ PROVIDERS: dict[str, ProviderMetadata] = {
         supports_otp=False,
         supports_long_term_token=True,
     ),
-    "onezero": ProviderMetadata(
-        key="onezero",
-        category="bank",
-        display_name="One Zero",
-        hebrew_name="וואן זירו",
-        login_fields=("phoneNumber",),
+    "max": ProviderMetadata(
+        key="max",
+        category="credit_card",
+        display_name="Max",
+        hebrew_name="מקס",
+        login_fields=("username", "password"),
         supports_otp=True,
         supports_long_term_token=True,
+    ),
+    "isracard": ProviderMetadata(
+        key="isracard",
+        category="credit_card",
+        display_name="Isracard",
+        hebrew_name="ישראכרט",
+        login_fields=("id", "card6Digits", "password"),
+        supports_otp=False,
+        supports_long_term_token=False,
+    ),
+    "amex": ProviderMetadata(
+        key="amex",
+        category="credit_card",
+        display_name="American Express",
+        hebrew_name="אמריקן אקספרס",
+        login_fields=("id", "card6Digits", "password"),
+        supports_otp=False,
+        supports_long_term_token=False,
     ),
     "haphoenix": ProviderMetadata(
         key="haphoenix",
@@ -68,11 +110,18 @@ PROVIDERS: dict[str, ProviderMetadata] = {
 }
 
 _ALIASES: dict[str, str] = {
-    "visa_cal": "visa_cal",
-    "visacal": "visa_cal",
-    "cal": "visa_cal",
     "onezero": "onezero",
     "one_zero": "onezero",
+    "pepper": "pepper",
+    "visa_cal": "visa_cal",
+    "visacal": "visa_cal",
+    "visa cal": "visa_cal",
+    "cal": "visa_cal",
+    "max": "max",
+    "leumicard": "max",
+    "isracard": "isracard",
+    "amex": "amex",
+    "americanexpress": "amex",
     "haphoenix": "haphoenix",
     "hafenix": "haphoenix",
     "phoenix": "haphoenix",
@@ -88,24 +137,20 @@ def create_scraper(
     *,
     client: httpx.AsyncClient | None = None,
 ) -> BaseScraper:
-    """Create a scraper instance for the given provider key.
-
-    Parameters
-    ----------
-    provider : str
-        Provider identifier (e.g. "visa_cal", "onezero", "haphoenix", "migdal").
-    credentials : dict
-        Credentials dictionary corresponding to provider login_fields.
-    options : ScraperOptions, optional
-        Execution options (timeout, proxy, date filters).
-    client : httpx.AsyncClient, optional
-        Pre-configured async HTTP client.
-    """
+    """Create a scraper instance for the given provider key."""
     canonical = _ALIASES.get((provider or "").strip().lower())
-    if canonical == "visa_cal":
-        return VisaCalScraper(credentials, options, client=client)
     if canonical == "onezero":
         return OneZeroScraper(credentials, options, client=client)
+    if canonical == "pepper":
+        return PepperScraper(credentials, options, client=client)
+    if canonical == "visa_cal":
+        return VisaCalScraper(credentials, options, client=client)
+    if canonical == "max":
+        return MaxScraper(credentials, options, client=client)
+    if canonical == "isracard":
+        return IsracardScraper(credentials, options, client=client)
+    if canonical == "amex":
+        return AmexScraper(credentials, options, client=client)
     if canonical == "haphoenix":
         return HaPhoenixScraper(credentials, options, client=client)
     if canonical == "migdal":
@@ -117,9 +162,13 @@ def create_scraper(
 
 __all__ = [
     "PROVIDERS",
+    "AmexScraper",
     "HaPhoenixScraper",
+    "IsracardScraper",
+    "MaxScraper",
     "MigdalScraper",
     "OneZeroScraper",
+    "PepperScraper",
     "ProviderMetadata",
     "VisaCalScraper",
     "create_scraper",

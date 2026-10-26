@@ -33,6 +33,7 @@ class ScraperOptions:
     combine_installments: bool = False
     include_balance_history: bool = True
     include_policy_details: bool = True
+    otp_code_resolver: Callable[[], Awaitable[str]] | None = None
 
 
 class BaseScraper(ABC):
@@ -72,6 +73,32 @@ class BaseScraper(ABC):
     def _emit_progress(self, stage: str) -> None:
         if self.on_progress is not None:
             self.on_progress(stage)
+
+    async def _resolve_otp_code(self) -> str:
+        """Resolve an SMS/Email OTP code from credentials, options, or on_otp_request."""
+        import inspect
+
+        raw_code = self.credentials.get("otpCode")
+        if raw_code:
+            code = str(raw_code).strip()
+        else:
+            resolver = (
+                self.on_otp_request
+                or self.options.otp_code_resolver
+                or self.credentials.get("otpCodeRetriever")
+            )
+            if resolver is None or not callable(resolver):
+                raise FinanceScraperError(
+                    f"{self.provider_name} requires an OTP code, but no OTP resolver was provided"
+                )
+            res = resolver()
+            if inspect.isawaitable(res):
+                res = await res
+            code = str(res or "").strip()
+
+        if not code or code == OTP_CANCEL_SENTINEL:
+            raise OtpCanceledError()
+        return code
 
     async def initialize(self) -> None:
         """Create the async HTTP client if one was not injected."""

@@ -12,6 +12,7 @@ from israeli_finance_scrapers.base.base_scraper import BaseScraper, ScraperOptio
 from israeli_finance_scrapers.base.exceptions import (
     FinanceScraperError,
     InvalidCredentialsError,
+    InvalidOtpError,
 )
 from israeli_finance_scrapers.models.bank import (
     Account,
@@ -21,6 +22,7 @@ from israeli_finance_scrapers.models.bank import (
     TransactionStatus,
     TransactionType,
 )
+from israeli_finance_scrapers.utils import normalize_israeli_id
 
 CAL_MOBILE_BASE_URL = "https://api-cc.cal-online.co.il"
 CAL_MOBILE_SITE_ID = "8D37DF16-5812-4ACD-BAE7-CD1A5BFA2207"
@@ -94,20 +96,46 @@ class VisaCalScraper(BaseScraper):
                         self.refreshed_long_term_token = res_obj["hash"]
                     return
 
-        # 2. Regular username and password login
+        # 2. Regular username and password login (if provided)
         username = self.credentials.get("username")
         password = self.credentials.get("password")
-        if not username or not password:
-            raise InvalidCredentialsError(
-                "Both 'username' and 'password' are required for Visa Cal"
-            )
+        if username and password:
+            await self._login_with_password(str(username).strip(), str(password).strip())
+            return
 
+        # 3. SMS OTP login (id + last4Digits/card4Digits or bankAccountNum)
+        raw_id = self.credentials.get("id") or self.credentials.get("custExtId")
+        last4 = (
+            self.credentials.get("card4Digits")
+            or self.credentials.get("last4Digits")
+            or (
+                str(self.credentials["card6Digits"]).strip()[-4:]
+                if self.credentials.get("card6Digits")
+                else None
+            )
+        )
+        bank_account = self.credentials.get("bankAccountNum")
+        if raw_id and (last4 or bank_account):
+            await self._login_with_sms_otp(
+                normalize_israeli_id(str(raw_id)),
+                last4=str(last4).strip() if last4 else None,
+                bank_account=str(bank_account).strip() if bank_account else None,
+            )
+            return
+
+        raise InvalidCredentialsError(
+            "Visa Cal requires either ('username' and 'password'), "
+            "('id' and 'card4Digits'/'bankAccountNum' for SMS OTP), or 'otpLongTermToken'"
+        )
+
+    async def _login_with_password(self, username: str, password: str) -> None:
+        assert self.client is not None
         login_res = await self.client.post(
             f"{CAL_MOBILE_BASE_URL}/Authentication/api/login/regularLogin",
             headers=CAL_MOBILE_HEADERS,
             json={
-                "username": str(username).strip(),
-                "password": str(password).strip(),
+                "username": username,
+                "password": password,
                 "uuid": uuid.uuid4().hex,
                 "newPassword": None,
             },
@@ -123,11 +151,83 @@ class VisaCalScraper(BaseScraper):
                 data.get("statusDescription") or "שם המשתמש או הסיסמה שהוזנו שגויים"
             )
 
-        if status_code != 1 or not data.get("result", {}).get("calConnectToken"):
+        if status_code != 1 or not (data.get("result") or {}).get("calConnectToken"):
             msg = data.get("statusDescription") or data.get("statusTitle") or "Login failed"
             raise FinanceScraperError(f"Cal login failed: {msg}")
 
         res_obj = data["result"]
+        token = res_obj["calConnectToken"].strip()
+        self.authorization = f"CALAuthScheme {token}"
+        self.mobile_token_guid = res_obj.get("temporaryGuid", "")
+        if res_obj.get("hash"):
+            self.refreshed_long_term_token = res_obj["hash"]
+
+    async def _login_with_sms_otp(
+        self,
+        id_num: str,
+        *,
+        last4: str | None = None,
+        bank_account: str | None = None,
+    ) -> None:
+        assert self.client is not None
+        if last4:
+            send_url = f"{CAL_MOBILE_BASE_URL}/Authentication/api/login/sendOTP"
+            send_payload: dict[str, Any] = {
+                "custExtId": id_num,
+                "last4Digits": last4,
+                "smsByVoice": False,
+            }
+        else:
+            send_url = f"{CAL_MOBILE_BASE_URL}/Authentication/api/login/sendOTPByAccount"
+            send_payload = {
+                "custExtId": id_num,
+                "bankAccountNum": bank_account,
+                "smsByVoice": False,
+            }
+
+        send_res = await self.client.post(
+            send_url,
+            headers=CAL_MOBILE_HEADERS,
+            json=send_payload,
+        )
+        if send_res.status_code != 200:
+            raise FinanceScraperError(f"Cal sendOTP failed with HTTP {send_res.status_code}")
+
+        send_data = send_res.json()
+        res_inner = send_data.get("result") if isinstance(send_data.get("result"), dict) else {}
+        otp_token = res_inner.get("token") or send_data.get("token")
+        if send_data.get("statusCode") != 1 or not otp_token:
+            msg = (
+                send_data.get("statusDescription")
+                or send_data.get("statusTitle")
+                or "Failed to send SMS OTP"
+            )
+            raise InvalidCredentialsError(str(msg))
+
+        otp_code = self.credentials.get("otpCode") or await self._resolve_otp_code()
+
+        verify_res = await self.client.post(
+            f"{CAL_MOBILE_BASE_URL}/Authentication/api/login/verifyOTP",
+            headers=CAL_MOBILE_HEADERS,
+            json={
+                "token": str(otp_token).strip(),
+                "password": str(otp_code).strip(),
+                "uuid": uuid.uuid4().hex,
+            },
+        )
+        if verify_res.status_code != 200:
+            raise FinanceScraperError(f"Cal verifyOTP failed with HTTP {verify_res.status_code}")
+
+        verify_data = verify_res.json()
+        res_obj = verify_data.get("result") if isinstance(verify_data.get("result"), dict) else {}
+        if verify_data.get("statusCode") != 1 or not res_obj.get("calConnectToken"):
+            msg = (
+                verify_data.get("statusDescription")
+                or verify_data.get("statusTitle")
+                or "Invalid SMS OTP code"
+            )
+            raise InvalidOtpError(str(msg))
+
         token = res_obj["calConnectToken"].strip()
         self.authorization = f"CALAuthScheme {token}"
         self.mobile_token_guid = res_obj.get("temporaryGuid", "")

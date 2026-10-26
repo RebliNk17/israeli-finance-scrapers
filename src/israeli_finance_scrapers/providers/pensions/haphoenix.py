@@ -1,8 +1,8 @@
-"""HaPhoenix (הפניקס) pure-HTTP mobile & portal API scraper.
+"""HaPhoenix (הפניקס) pure-HTTP API scraper.
 
-Uses the reverse-engineered HaPhoenix mobile API (`pinfo-mobileapp-services.fnx.co.il`)
+Uses the HaPhoenix services API (`pinfo-mobileapp-services.fnx.co.il`)
 for Auth0 MFA/OTP login, 6-month `refresh_token` rotation, portfolio graphs, and exposure
-charts, combined with the mobile portal API (`pinfo-mobile.fnx.co.il/api/v1/info`) using
+charts, combined with the portal API (`pinfo-mobile.fnx.co.il/api/v1/info`) using
 the exact same Bearer JWT for deep per-policy details (employer/employee deposit splits,
 yearly movement statements, fee discount schedules, insurance covers, and seniority dates).
 """

@@ -16,7 +16,7 @@ async def test_onezero_login_with_stored_token_and_scrape():
             )
         if "graphql" in url:
             body = request.read().decode("utf-8")
-            if "GetPortfolios" in body:
+            if "GetCustomer" in body or "GetPortfolios" in body:
                 return httpx.Response(
                     200,
                     json={
