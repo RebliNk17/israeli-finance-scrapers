@@ -457,7 +457,9 @@ class VisaCalScraper(BaseScraper):
 
         # Cal: purchase positive, refund negative. Here a charge is negative (like Max).
         original_amount = -float(t.get("trnAmt") or 0.0)
-        charged_amount = -float(t.get("cashAccountTrnAmt") or 0.0) or original_amount
+        # What was charged, discounts included: a fully waived fee charges 0.
+        cash = t.get("cashAccountTrnAmt")
+        charged_amount = original_amount if cash is None else -float(cash)
 
         return Transaction(
             identifier=str(t.get("trnIntId") or t.get("trnNumaretor") or ""),

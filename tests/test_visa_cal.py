@@ -110,6 +110,16 @@ async def test_visa_cal_login_and_scrape_success():
                                                 "debCrdCurrencySymbol": "₪",
                                                 "trnTypeCode": "6",
                                             },
+                                            {
+                                                "trnIntId": "tx3",
+                                                "trnPurchaseDate": "2026-10-01",
+                                                "debCrdDate": "2026-10-02",
+                                                "trnAmt": 17.9,
+                                                "cashAccountTrnAmt": 0.0,  # fully discounted
+                                                "merchantName": "Card fee",
+                                                "debCrdCurrencySymbol": "₪",
+                                                "trnTypeCode": "5",
+                                            },
                                         ],
                                     }
                                 ]
@@ -140,7 +150,7 @@ async def test_visa_cal_login_and_scrape_success():
     assert account.balance_date == "2026-11-02"
     assert account.credit_limit == 15000.0
     assert account.open_to_buy == 12000.0
-    assert len(account.txns) == 3
+    assert len(account.txns) == 4
 
     # A charge is negative (Cal reports purchases as positive amounts), a refund positive.
     pending = [t for t in account.txns if t.status == TransactionStatus.PENDING]
@@ -152,6 +162,8 @@ async def test_visa_cal_login_and_scrape_success():
     shufersal = completed["Shufersal"]
     assert (shufersal.charged_amount, shufersal.original_amount) == (-320.0, -320.0)
     assert completed["Shufersal refund"].charged_amount == 50.0
+    fee = completed["Card fee"]  # waived by a discount: charged 0, not the pre-discount 17.90
+    assert (fee.charged_amount, fee.original_amount) == (0.0, -17.9)
 
 
 @pytest.mark.asyncio

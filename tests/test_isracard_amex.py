@@ -109,7 +109,15 @@ async def test_isracard_and_amex_mobile_scrape(provider: str) -> None:
                                             "currentInstallmentNum": 1,
                                             "numberOfInstallment": 3,
                                             "voucherNumber": 888777,
-                                        }
+                                        },
+                                        {
+                                            "purchaseDate": "23/10/2026",
+                                            "businessName": "דמי כרטיס /הנפקה",
+                                            "originalAmount": 22.9,
+                                            "billingAmount": 0.0,  # fully discounted
+                                            "originalCurrencyIso": "ILS",
+                                            "voucherNumber": 555444,
+                                        },
                                     ]
                                 }
                             },
@@ -136,13 +144,17 @@ async def test_isracard_and_amex_mobile_scrape(provider: str) -> None:
     assert acc.credit_limit == 30000.0
     assert acc.open_to_buy == 25500.0
     assert acc.balance == -4500.0
-    assert len(acc.txns) == 2
+    assert len(acc.txns) == 3
 
     pending = next(t for t in acc.txns if t.status == TransactionStatus.PENDING)
     assert pending.identifier == "conf-999"
     assert pending.charged_amount == -120.0
 
-    completed = next(t for t in acc.txns if t.status == TransactionStatus.COMPLETED)
+    # A fee waived by a discount bills ₪0, not the pre-discount 22.90.
+    fee = next(t for t in acc.txns if t.identifier == "555444")
+    assert (fee.charged_amount, fee.original_amount) == (0.0, -22.9)
+
+    completed = next(t for t in acc.txns if t.identifier == "888777")
     assert completed.identifier == "888777"
     assert completed.charged_amount == -400.0
     assert completed.original_amount == -1200.0
