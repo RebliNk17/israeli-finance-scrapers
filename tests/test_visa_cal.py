@@ -99,7 +99,17 @@ async def test_visa_cal_login_and_scrape_success():
                                                 "merchantName": "Shufersal",
                                                 "debCrdCurrencySymbol": "₪",
                                                 "trnTypeCode": "5",
-                                            }
+                                            },
+                                            {
+                                                "trnIntId": "tx2",
+                                                "trnPurchaseDate": "2026-09-29",
+                                                "debCrdDate": "2026-10-02",
+                                                "trnAmt": -50.0,
+                                                "cashAccountTrnAmt": -50.0,
+                                                "merchantName": "Shufersal refund",
+                                                "debCrdCurrencySymbol": "₪",
+                                                "trnTypeCode": "6",
+                                            },
                                         ],
                                     }
                                 ]
@@ -130,19 +140,18 @@ async def test_visa_cal_login_and_scrape_success():
     assert account.balance_date == "2026-11-02"
     assert account.credit_limit == 15000.0
     assert account.open_to_buy == 12000.0
-    assert len(account.txns) == 2
+    assert len(account.txns) == 3
 
-    # Check pending
+    # A charge is negative (Cal reports purchases as positive amounts), a refund positive.
     pending = [t for t in account.txns if t.status == TransactionStatus.PENDING]
     assert len(pending) == 1
     assert pending[0].description == "Cafe Aroma"
-    assert pending[0].charged_amount == 45.0
+    assert (pending[0].charged_amount, pending[0].original_amount) == (-45.0, -45.0)
 
-    # Check completed
-    completed = [t for t in account.txns if t.status == TransactionStatus.COMPLETED]
-    assert len(completed) == 1
-    assert completed[0].description == "Shufersal"
-    assert completed[0].charged_amount == 320.0
+    completed = {t.description: t for t in account.txns if t.status == TransactionStatus.COMPLETED}
+    shufersal = completed["Shufersal"]
+    assert (shufersal.charged_amount, shufersal.original_amount) == (-320.0, -320.0)
+    assert completed["Shufersal refund"].charged_amount == 50.0
 
 
 @pytest.mark.asyncio

@@ -371,7 +371,9 @@ class VisaCalScraper(BaseScraper):
                 auth_list = item.get("authDetalisList") or []
                 for a in auth_list:
                     raw_date = a.get("trnPurchaseDate") or datetime.now(UTC).strftime("%Y-%m-%d")
-                    amount = float(a.get("amount") or 0.0)
+                    # Cal reports a purchase as a positive amount; a charge is negative here,
+                    # as in every other provider.
+                    amount = -float(a.get("amount") or 0.0)
                     txns.append(
                         Transaction(
                             identifier=str(a.get("authNum") or ""),
@@ -453,8 +455,9 @@ class VisaCalScraper(BaseScraper):
         purchase_date = str(t.get("trnPurchaseDate") or "")[:10]
         proc_date = str(t.get("debCrdDate") or debit_date or "")[:10]
 
-        original_amount = float(t.get("trnAmt") or 0.0)
-        charged_amount = float(t.get("cashAccountTrnAmt") or original_amount)
+        # Cal: purchase positive, refund negative. Here a charge is negative (like Max).
+        original_amount = -float(t.get("trnAmt") or 0.0)
+        charged_amount = -float(t.get("cashAccountTrnAmt") or 0.0) or original_amount
 
         return Transaction(
             identifier=str(t.get("trnIntId") or t.get("trnNumaretor") or ""),
