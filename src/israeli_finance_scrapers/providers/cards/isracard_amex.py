@@ -509,13 +509,10 @@ class BaseIsracardAmexScraper(BaseScraper):
         if not pdate:
             return None
         orig_amt = float(raw.get("originalAmount") or 0.0)
+        bill_amt = float(raw.get("ilsBillingAmount") or orig_amt)
         desc = str(raw.get("businessName") or "").strip()
         ident = raw.get("seqConfirmationNumber") or raw.get("confirmationNumber")
         curr = _normalize_currency(raw.get("currencyIso") or raw.get("currencySimbol"))
-        # A pending foreign charge shows ₪0 until converted: fall back to the original then.
-        bill = raw.get("ilsBillingAmount")
-        unconverted = bill is None or (float(bill) == 0.0 and curr != "ILS")
-        bill_amt = orig_amt if unconverted else float(bill)
         return Transaction(
             identifier=str(ident).strip() if ident else None,
             date=pdate,
@@ -543,12 +540,7 @@ class BaseIsracardAmexScraper(BaseScraper):
             return None
 
         orig_amt = float(raw.get("originalAmount") or 0.0)
-        # What was billed, discounts included: a fully waived card fee bills ₪0 (`or` would
-        # have fallen back to the pre-discount amount).
-        bill = next(
-            (raw[k] for k in ("billingAmount", "ilsAmount") if raw.get(k) is not None), None
-        )
-        bill_amt = orig_amt if bill is None else float(bill)
+        bill_amt = float(raw.get("billingAmount") or raw.get("ilsAmount") or orig_amt)
         curr = _normalize_currency(
             raw.get("originalCurrencyIso") or raw.get("originalCurrencySymbol")
         )
