@@ -371,16 +371,16 @@ class VisaCalScraper(BaseScraper):
                 auth_list = item.get("authDetalisList") or []
                 for a in auth_list:
                     raw_date = a.get("trnPurchaseDate") or datetime.now(UTC).strftime("%Y-%m-%d")
-                    # Cal reports a purchase as a positive amount; a charge is negative here,
-                    # as in every other provider.
-                    amount = -float(a.get("amount") or 0.0)
+                    # Cal sends the purchase unsigned, in its own currency; a charge is negative
+                    # here, as in every other provider.
+                    amount = -float(a.get("trnAmt") or 0.0)
                     txns.append(
                         Transaction(
                             identifier=str(a.get("authNum") or ""),
                             date=raw_date[:10],
                             processed_date=None,
                             original_amount=amount,
-                            original_currency=_normalize_currency(a.get("currencySymbol")),
+                            original_currency=_normalize_currency(a.get("trnCurrencySymbol")),
                             charged_amount=amount,
                             description=a.get("merchantName") or "",
                             status=TransactionStatus.PENDING,
@@ -455,9 +455,13 @@ class VisaCalScraper(BaseScraper):
         purchase_date = str(t.get("trnPurchaseDate") or "")[:10]
         proc_date = str(t.get("debCrdDate") or debit_date or "")[:10]
 
-        # Cal: purchase positive, refund negative. Here a charge is negative (like Max).
-        original_amount = -float(t.get("trnAmt") or 0.0)
-        charged_amount = -float(t.get("cashAccountTrnAmt") or 0.0) or original_amount
+        # Cal sends trnAmt unsigned, in the purchase currency. amtBeforeConvAndIndex is what the
+        # statement bills in shekels, signed (negative for a refund): one installment's payment,
+        # 0 for a CashCal accrual that never reaches the bill. Here a charge is negative (like Max).
+        billed = t.get("amtBeforeConvAndIndex")
+        credit = trn_type_code == "6" or float(billed or 0.0) < 0
+        original_amount = abs(float(t.get("trnAmt") or 0.0)) * (1 if credit else -1)
+        charged_amount = -float(billed) if billed is not None else original_amount
 
         return Transaction(
             identifier=str(t.get("trnIntId") or t.get("trnNumaretor") or ""),
@@ -465,7 +469,7 @@ class VisaCalScraper(BaseScraper):
             processed_date=proc_date or None,
             original_amount=original_amount,
             original_currency=_normalize_currency(
-                t.get("debCrdCurrencySymbol") or t.get("trnCurrencySymbol")
+                t.get("trnCurrencySymbol") or t.get("debCrdCurrencySymbol")
             ),
             charged_amount=charged_amount,
             description=str(t.get("merchantName") or "").strip(),

@@ -8,6 +8,22 @@ from israeli_finance_scrapers.models.bank import TransactionStatus
 from israeli_finance_scrapers.providers.cards.visa_cal import VisaCalScraper
 
 
+def _cal_txn(tid: str, merchant: str, code: str, trn_amt: float, billed: float, **extra) -> dict:
+    return {
+        "trnIntId": tid,
+        "trnPurchaseDate": "2026-09-28",
+        "debCrdDate": "2026-10-02",
+        "trnAmt": trn_amt,
+        "cashAccountTrnAmt": 0.0,
+        "amtBeforeConvAndIndex": billed,
+        "merchantName": merchant,
+        "trnCurrencySymbol": "₪",
+        "debCrdCurrencySymbol": "₪",
+        "trnTypeCode": code,
+        **extra,
+    }
+
+
 @pytest.mark.asyncio
 async def test_visa_cal_login_and_scrape_success():
     def handler(request: httpx.Request) -> httpx.Response:
@@ -68,8 +84,8 @@ async def test_visa_cal_login_and_scrape_success():
                                     {
                                         "authNum": "999",
                                         "trnPurchaseDate": "2026-10-24T18:00:00",
-                                        "amount": 45.0,
-                                        "currencySymbol": "₪",
+                                        "trnAmt": 45.0,
+                                        "trnCurrencySymbol": "₪",
                                         "merchantName": "Cafe Aroma",
                                     }
                                 ],
@@ -88,28 +104,32 @@ async def test_visa_cal_login_and_scrape_success():
                             {
                                 "debitDates": [
                                     {
+                                        # Real shapes: trnAmt unsigned in the purchase currency,
+                                        # amtBeforeConvAndIndex the signed shekel bill,
+                                        # cashAccountTrnAmt 0 throughout.
                                         "date": "2026-10-02",
                                         "transactions": [
-                                            {
-                                                "trnIntId": "tx1",
-                                                "trnPurchaseDate": "2026-09-28",
-                                                "debCrdDate": "2026-10-02",
-                                                "trnAmt": 320.0,
-                                                "cashAccountTrnAmt": 320.0,
-                                                "merchantName": "Shufersal",
-                                                "debCrdCurrencySymbol": "₪",
-                                                "trnTypeCode": "5",
-                                            },
-                                            {
-                                                "trnIntId": "tx2",
-                                                "trnPurchaseDate": "2026-09-29",
-                                                "debCrdDate": "2026-10-02",
-                                                "trnAmt": -50.0,
-                                                "cashAccountTrnAmt": -50.0,
-                                                "merchantName": "Shufersal refund",
-                                                "debCrdCurrencySymbol": "₪",
-                                                "trnTypeCode": "6",
-                                            },
+                                            _cal_txn("tx1", "Shufersal", "5", 320.0, 320.0),
+                                            _cal_txn("tx2", "Shufersal refund", "6", 50.0, -50.0),
+                                            _cal_txn("tx3", "Fee refund", "71", 9.54, -9.54),
+                                            _cal_txn(
+                                                "tx4",
+                                                "aliexpress",
+                                                "5",
+                                                67.49,
+                                                209.81,
+                                                trnCurrencySymbol="$",
+                                            ),
+                                            _cal_txn(
+                                                "tx5",
+                                                "Samsung",
+                                                "8",
+                                                8362.5,
+                                                232.0,
+                                                curPaymentNum=4,
+                                                numOfPayments=36,
+                                            ),
+                                            _cal_txn("tx6", "CashCal", "6", 13.26, 0.0),
                                         ],
                                     }
                                 ]
@@ -140,7 +160,7 @@ async def test_visa_cal_login_and_scrape_success():
     assert account.balance_date == "2026-11-02"
     assert account.credit_limit == 15000.0
     assert account.open_to_buy == 12000.0
-    assert len(account.txns) == 3
+    assert len(account.txns) == 7
 
     # A charge is negative (Cal reports purchases as positive amounts), a refund positive.
     pending = [t for t in account.txns if t.status == TransactionStatus.PENDING]
@@ -149,9 +169,17 @@ async def test_visa_cal_login_and_scrape_success():
     assert (pending[0].charged_amount, pending[0].original_amount) == (-45.0, -45.0)
 
     completed = {t.description: t for t in account.txns if t.status == TransactionStatus.COMPLETED}
-    shufersal = completed["Shufersal"]
-    assert (shufersal.charged_amount, shufersal.original_amount) == (-320.0, -320.0)
-    assert completed["Shufersal refund"].charged_amount == 50.0
+    amounts = {
+        d: (t.charged_amount, t.original_amount, t.original_currency) for d, t in completed.items()
+    }
+    assert amounts == {
+        "Shufersal": (-320.0, -320.0, "ILS"),
+        "Shufersal refund": (50.0, 50.0, "ILS"),
+        "Fee refund": (9.54, 9.54, "ILS"),
+        "aliexpress": (-209.81, -67.49, "USD"),  # billed in shekels, bought in dollars
+        "Samsung": (-232.0, -8362.5, "ILS"),  # this statement's installment, not the purchase
+        "CashCal": (0.0, 13.26, "ILS"),  # a club accrual: nothing billed
+    }
 
 
 @pytest.mark.asyncio
