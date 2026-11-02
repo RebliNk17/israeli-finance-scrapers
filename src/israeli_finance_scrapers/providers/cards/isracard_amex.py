@@ -544,6 +544,10 @@ class BaseIsracardAmexScraper(BaseScraper):
         curr = _normalize_currency(
             raw.get("originalCurrencyIso") or raw.get("originalCurrencySymbol")
         )
+        if raw.get("discountIndication") and not raw.get("billingAmount") and curr == "ILS":
+            # A 0 billing amount is usually "not billed yet", but with a discount it is what the
+            # discount left (a card fee waived in full, "הנחה 22.9 ש"ח").
+            bill_amt = orig_amt - float(raw.get("discountAmount") or 0.0)
         more_info = str(raw.get("moreInfo") or "").strip()
 
         installments: InstallmentsInfo | None = None

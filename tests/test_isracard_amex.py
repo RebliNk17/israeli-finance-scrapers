@@ -109,7 +109,29 @@ async def test_isracard_and_amex_mobile_scrape(provider: str) -> None:
                                             "currentInstallmentNum": 1,
                                             "numberOfInstallment": 3,
                                             "voucherNumber": 888777,
-                                        }
+                                        },
+                                        {  # a card fee waived in full: billed 0 with a discount
+                                            "purchaseDate": "23/10/2026",
+                                            "businessName": "דמי כרטיס /הנפקה",
+                                            "originalAmount": 22.9,
+                                            "ilsAmount": 0,
+                                            "billingAmount": 0,
+                                            "originalCurrencyIso": "ILS",
+                                            "moreInfo": '   הנחה 22.9 ש"ח ',
+                                            "voucherNumber": 8064699,
+                                            "discountIndication": True,
+                                            "discountAmount": 22.9,
+                                        },
+                                        {  # not billed yet: 0 without a discount is the full price
+                                            "purchaseDate": "25/10/2026",
+                                            "businessName": "GOOGLE CLOUD",
+                                            "originalAmount": 19.82,
+                                            "ilsAmount": 0,
+                                            "billingAmount": 0,
+                                            "originalCurrencyIso": "ILS",
+                                            "voucherNumber": 317623,
+                                            "discountIndication": False,
+                                        },
                                     ]
                                 }
                             },
@@ -136,13 +158,17 @@ async def test_isracard_and_amex_mobile_scrape(provider: str) -> None:
     assert acc.credit_limit == 30000.0
     assert acc.open_to_buy == 25500.0
     assert acc.balance == -4500.0
-    assert len(acc.txns) == 2
+    assert len(acc.txns) == 4
 
     pending = next(t for t in acc.txns if t.status == TransactionStatus.PENDING)
     assert pending.identifier == "conf-999"
     assert pending.charged_amount == -120.0
 
-    completed = next(t for t in acc.txns if t.status == TransactionStatus.COMPLETED)
+    by_id = {t.identifier: t for t in acc.txns}
+    assert (by_id["8064699"].charged_amount, by_id["8064699"].original_amount) == (0.0, -22.9)
+    assert by_id["317623"].charged_amount == -19.82
+
+    completed = by_id["888777"]
     assert completed.identifier == "888777"
     assert completed.charged_amount == -400.0
     assert completed.original_amount == -1200.0
