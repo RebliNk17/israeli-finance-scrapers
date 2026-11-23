@@ -204,3 +204,64 @@ async def test_max_random_device_id_and_one_time_enrollment() -> None:
     tok = json.loads(scraper.refreshed_long_term_token)
     assert tok["dId"].startswith("LC_")
     assert len(tok["fpr"]) == 64
+
+
+def _max_item(**extra) -> dict:
+    return {
+        "Type": 0,
+        "CNum": "1234",
+        "MerchantDescription": "SEVEN BANK",
+        "PurchaseDateTime": "2026-10-01T10:00:00",
+        "PaymentDate": "2026-11-10 00:00:00",
+        "PlanDesc": "רגילה",
+        "Comments": "",
+        **extra,
+    }
+
+
+@pytest.mark.parametrize(
+    ("extra", "expected"),
+    [
+        # A foreign purchase billed in shekels: the purchase currency is not the bill's.
+        (
+            {
+                "PaymentCurrency": 376,
+                "ActualPayment": "₪195.00",
+                "OriginalAmountDouble": 10000.0,
+                "OriginalCurrency": "JPY",
+            },
+            (-195.0, -10000.0, "JPY"),
+        ),
+        # The purchase currency carried only as a symbol on the original amount.
+        (
+            {"PaymentCurrency": 376, "ActualPayment": "₪195.00", "OriginalAmount": "¥10,000"},
+            (-195.0, -10000.0, "JPY"),
+        ),
+        # A numeric purchase currency code outside the old four-currency table.
+        (
+            {
+                "PaymentCurrency": 376,
+                "ActualPayment": "₪36.40",
+                "OriginalAmountDouble": 8.5,
+                "OriginalCurrency": 756,
+            },
+            (-36.4, -8.5, "CHF"),
+        ),
+        # A dollar-billed charge: no separate purchase currency, the bill's applies.
+        (
+            {"PaymentCurrency": 840, "ActualPayment": "$12.00", "OriginalAmountDouble": 12.0},
+            (-12.0, -12.0, "USD"),
+        ),
+        # A plain shekel charge.
+        (
+            {"PaymentCurrency": 376, "ActualPayment": "₪22.50", "OriginalAmountDouble": 22.5},
+            (-22.5, -22.5, "ILS"),
+        ),
+    ],
+)
+def test_max_foreign_currency(extra: dict, expected: tuple) -> None:
+    from israeli_finance_scrapers.providers.cards.max import MaxScraper
+
+    txn = MaxScraper._map_txn(_max_item(**extra), TransactionStatus.COMPLETED)
+    assert txn is not None
+    assert (txn.charged_amount, txn.original_amount, txn.original_currency) == expected

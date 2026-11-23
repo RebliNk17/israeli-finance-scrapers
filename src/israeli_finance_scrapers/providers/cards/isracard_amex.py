@@ -26,7 +26,12 @@ from israeli_finance_scrapers.models.bank import (
     TransactionStatus,
     TransactionType,
 )
-from israeli_finance_scrapers.utils import extract_number, normalize_israeli_id, parse_il_date
+from israeli_finance_scrapers.utils import (
+    extract_number,
+    normalize_currency,
+    normalize_israeli_id,
+    parse_il_date,
+)
 
 MOBILE_USER_AGENT = (
     "Mozilla/5.0 (Linux; Android 11; Pixel 3 Build/RQ1A.210105.003; wv) "
@@ -34,21 +39,9 @@ MOBILE_USER_AGENT = (
     "Mobile Safari/537.36"
 )
 
-_CURRENCY_MAP = {
-    "₪": "ILS",
-    'ש"ח': "ILS",
-    "NIS": "ILS",
-    "$": "USD",
-    "€": "EUR",
-    "£": "GBP",
-}
-
 
 def _normalize_currency(sym: str | None) -> str:
-    if not sym:
-        return "ILS"
-    cleaned = sym.strip()
-    return _CURRENCY_MAP.get(cleaned, cleaned)
+    return normalize_currency(sym) or "ILS"
 
 
 class BaseIsracardAmexScraper(BaseScraper):

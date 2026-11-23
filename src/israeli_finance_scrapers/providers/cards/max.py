@@ -29,7 +29,12 @@ from israeli_finance_scrapers.models.bank import (
     TransactionStatus,
     TransactionType,
 )
-from israeli_finance_scrapers.utils import extract_number, parse_il_date
+from israeli_finance_scrapers.utils import (
+    currency_from_amount_text,
+    extract_number,
+    normalize_currency,
+    parse_il_date,
+)
 
 MAX_LCAPI_BASE_URL = "https://mpg.max.co.il/MPG49/DRS04/TPS2/lcapi"
 APP_ID = "505"
@@ -45,12 +50,24 @@ MAX_HEADERS = {
     "User-Agent": "okhttp/4.12.0",
 }
 
-_CURRENCY_BY_CODE = {
-    376: "ILS",
-    840: "USD",
-    978: "EUR",
-    826: "GBP",
-}
+# Fields that may carry the purchase currency (ISO code, symbol or ISO numeric code).
+_ORIGINAL_CURRENCY_FIELDS = (
+    "OriginalCurrency",
+    "OriginalCurrencyCode",
+    "OriginalCurrencyIso",
+    "OriginalCurrencySymbol",
+    "PurchaseCurrency",
+    "DealCurrency",
+)
+
+
+def _original_currency(raw: dict[str, Any], payment_currency: str) -> str:
+    """The currency of the purchase, which for a foreign charge differs from the bill's."""
+    for field in _ORIGINAL_CURRENCY_FIELDS:
+        curr = normalize_currency(raw.get(field), default=None)
+        if curr:
+            return curr
+    return currency_from_amount_text(raw.get("OriginalAmount")) or payment_currency
 
 
 def _parse_amount(val: Any) -> float:
@@ -385,8 +402,12 @@ class MaxScraper(BaseScraper):
         charged_amount = -actual_amt
         original_amount = -orig_amt if actual_amt >= 0 else abs(orig_amt)
 
-        curr_code = int(raw.get("PaymentCurrency") or 376)
-        currency = _CURRENCY_BY_CODE.get(curr_code, "ILS")
+        payment_currency = (
+            normalize_currency(raw.get("PaymentCurrency"), default=None)
+            or currency_from_amount_text(raw.get("ActualPayment"))
+            or "ILS"
+        )
+        currency = _original_currency(raw, payment_currency)
 
         desc = str(raw.get("MerchantDescription") or "").strip()
         comments = str(raw.get("Comments") or "").strip()

@@ -145,3 +145,70 @@ def parse_salary_month(value: str | None) -> str | None:
         year, month = m_iso.groups()
         return f"{year}-{month}"
     return None
+
+
+# Currency symbols and local spellings the card APIs send instead of an ISO 4217 code.
+_CURRENCY_BY_SYMBOL = {
+    "₪": "ILS",
+    'ש"ח': "ILS",
+    "ש״ח": "ILS",
+    "שח": "ILS",
+    "NIS": "ILS",
+    "$": "USD",
+    "US$": "USD",
+    "€": "EUR",
+    "£": "GBP",
+    "¥": "JPY",
+    "JP¥": "JPY",
+    "CN¥": "CNY",
+    "₩": "KRW",
+    "₹": "INR",
+    "₺": "TRY",
+    "₽": "RUB",
+    "฿": "THB",
+    "₫": "VND",
+    "zł": "PLN",
+    "Kč": "CZK",
+    "Fr.": "CHF",
+}
+
+# ISO 4217 numeric codes (Max sends PaymentCurrency as a number).
+_CURRENCY_BY_NUMERIC = {
+    36: "AUD", 124: "CAD", 156: "CNY", 203: "CZK", 208: "DKK", 344: "HKD", 348: "HUF",
+    352: "ISK", 356: "INR", 360: "IDR", 376: "ILS", 392: "JPY", 400: "JOD", 410: "KRW",
+    458: "MYR", 484: "MXN", 554: "NZD", 578: "NOK", 608: "PHP", 643: "RUB", 702: "SGD",
+    704: "VND", 710: "ZAR", 752: "SEK", 756: "CHF", 764: "THB", 784: "AED", 818: "EGP",
+    826: "GBP", 840: "USD", 941: "RSD", 946: "RON", 949: "TRY", 975: "BGN", 978: "EUR",
+    981: "GEL", 985: "PLN", 986: "BRL",
+}  # fmt: skip
+
+
+def normalize_currency(value: Any, default: str | None = "ILS") -> str | None:
+    """Return the ISO 4217 code for a currency symbol, alphabetic code or numeric code.
+
+    Empty values give ``default``. An unrecognised symbol or number also gives ``default``
+    rather than being reported as a currency it might not be; an unrecognised three-letter
+    code is returned as is (upper-cased).
+    """
+    if value is None or value == "":
+        return default
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return _CURRENCY_BY_NUMERIC.get(int(value), default)
+    text = str(value).strip()
+    if not text:
+        return default
+    if text.isdigit():
+        return _CURRENCY_BY_NUMERIC.get(int(text), default)
+    if text in _CURRENCY_BY_SYMBOL:
+        return _CURRENCY_BY_SYMBOL[text]
+    if re.fullmatch(r"[A-Za-z]{3}", text):
+        return text.upper()
+    return default
+
+
+def currency_from_amount_text(text: Any) -> str | None:
+    """Return the currency marked on an amount string such as ``'¥10,000'`` or ``'12.5 USD'``."""
+    if not isinstance(text, str):
+        return None
+    marker = re.sub(r"[\d.,\s+\-]", "", text)
+    return normalize_currency(marker, default=None) if marker else None

@@ -22,7 +22,7 @@ from israeli_finance_scrapers.models.bank import (
     TransactionStatus,
     TransactionType,
 )
-from israeli_finance_scrapers.utils import normalize_israeli_id
+from israeli_finance_scrapers.utils import normalize_currency, normalize_israeli_id
 
 CAL_MOBILE_BASE_URL = "https://api-cc.cal-online.co.il"
 CAL_MOBILE_SITE_ID = "8D37DF16-5812-4ACD-BAE7-CD1A5BFA2207"
@@ -41,18 +41,9 @@ CAL_MOBILE_HEADERS = {
     ),
 }
 
-CURRENCY_MAP = {
-    "₪": "ILS",
-    "$": "USD",
-    "€": "EUR",
-    "£": "GBP",
-}
-
 
 def _normalize_currency(sym: str | None) -> str:
-    if not sym:
-        return "ILS"
-    return CURRENCY_MAP.get(sym.strip(), sym.strip())
+    return normalize_currency(sym) or "ILS"
 
 
 class VisaCalScraper(BaseScraper):
