@@ -130,6 +130,16 @@ async def test_visa_cal_login_and_scrape_success():
                                                 numOfPayments=36,
                                             ),
                                             _cal_txn("tx6", "CashCal", "6", 13.26, 0.0),
+                                            _cal_txn(  # issue #2: foreign cash withdrawal
+                                                "tx7",
+                                                "SEVEN BANK",
+                                                "7",
+                                                10000.0,
+                                                195.0,
+                                                trnCurrencySymbol="JPY",
+                                                curPaymentNum=0,
+                                                numOfPayments=0,
+                                            ),
                                         ],
                                     }
                                 ]
@@ -160,7 +170,7 @@ async def test_visa_cal_login_and_scrape_success():
     assert account.balance_date == "2026-11-02"
     assert account.credit_limit == 15000.0
     assert account.open_to_buy == 12000.0
-    assert len(account.txns) == 7
+    assert len(account.txns) == 8
 
     # A charge is negative (Cal reports purchases as positive amounts), a refund positive.
     pending = [t for t in account.txns if t.status == TransactionStatus.PENDING]
@@ -179,6 +189,7 @@ async def test_visa_cal_login_and_scrape_success():
         "aliexpress": (-209.81, -67.49, "USD"),  # billed in shekels, bought in dollars
         "Samsung": (-232.0, -8362.5, "ILS"),  # this statement's installment, not the purchase
         "CashCal": (0.0, 13.26, "ILS"),  # a club accrual: nothing billed
+        "SEVEN BANK": (-195.0, -10000.0, "JPY"),  # billed in shekels, withdrawn in yen
     }
 
 
@@ -326,3 +337,30 @@ async def test_visa_cal_sms_otp_login_and_long_term_token():
     result = await scraper.scrape()
     assert result.success is True
     assert result.long_term_token == "bio_hash_from_otp"
+
+
+def test_visa_cal_foreign_currency_is_billed_in_shekels():
+    """Issue #2: a JPY cash withdrawal is reported in yen and billed in shekels."""
+    scraper = VisaCalScraper({"username": "u", "password": "p"})
+    raw = {
+        "trnIntId": "xxx",
+        "trnNumaretor": 2,
+        "merchantName": "SEVEN BANK",
+        "trnPurchaseDate": "2026-10-01T00:00:00",
+        "trnAmt": 10000.0,
+        "trnCurrencySymbol": "JPY",
+        "trnType": "משיכת מזומן",
+        "trnTypeCode": "7",
+        "debCrdDate": "2026-11-02T00:00:00",
+        "amtBeforeConvAndIndex": 195.0,
+        "debCrdCurrencySymbol": "₪",
+        "curPaymentNum": 0,
+        "numOfPayments": 0,
+        "cashAccountTrnAmt": 0.0,
+    }
+    txn = scraper._parse_completed_txn(raw, None)
+    assert txn.original_amount == -10000.0
+    assert txn.original_currency == "JPY"
+    assert txn.charged_amount == -195.0
+    assert txn.category == "משיכת מזומן"
+    assert txn.installments is None
